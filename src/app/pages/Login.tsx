@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router';
-import { ShieldPlus, User, BriefcaseMedical, Mail, Lock, AlertCircle, Eye, EyeOff, Loader2, X } from 'lucide-react';
+import { ShieldPlus, User, Mail, Lock, AlertCircle, Eye, EyeOff, Loader2, X } from 'lucide-react';
 import { useAuth } from '../state/AuthContext';
 import { getQuickUsers, removeQuickUserByEmail } from '../utils/cookies';
 import type { QuickUser } from '../utils/cookies';
@@ -14,7 +14,11 @@ export function Login() {
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showManualForm, setShowManualForm] = useState(false);
-  const [quickUsers, setQuickUsers] = useState<QuickUser[]>(getQuickUsers);
+
+  // Only show client-role users in Quick Sign In
+  const [quickUsers, setQuickUsers] = useState<QuickUser[]>(
+    () => getQuickUsers().filter(u => u.role === 'client')
+  );
 
   // Auto-redirect if already logged in
   useEffect(() => {
@@ -28,7 +32,7 @@ export function Login() {
     setIsLoading(true);
     try {
       await login(target.email, target.password);
-      navigate(target.role === 'client' ? '/client' : '/analyst', { replace: true });
+      navigate('/client', { replace: true });
     } catch (err: any) {
       setError(err.response?.data?.message || 'Login failed. Please try again.');
     } finally {
@@ -56,7 +60,7 @@ export function Login() {
 
   const handleRemoveUser = (targetEmail: string) => {
     removeQuickUserByEmail(targetEmail);
-    setQuickUsers(getQuickUsers());
+    setQuickUsers(getQuickUsers().filter(u => u.role === 'client'));
   };
 
   return (
@@ -97,23 +101,13 @@ export function Login() {
                         className="w-full flex items-center justify-between p-3.5 rounded-xl border border-slate-200 hover:border-blue-300 hover:bg-blue-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <div className="flex items-center gap-3 min-w-0">
-                          <div className={`w-9 h-9 rounded-full shrink-0 flex items-center justify-center ${
-                            qUser.role === 'analyst'
-                              ? 'bg-indigo-50 text-indigo-600'
-                              : 'bg-blue-50 text-blue-600'
-                          }`}>
-                            {qUser.role === 'analyst'
-                              ? <BriefcaseMedical className="w-4 h-4" />
-                              : <User className="w-4 h-4" />
-                            }
+                          <div className="w-9 h-9 rounded-full shrink-0 flex items-center justify-center bg-blue-50 text-blue-600">
+                            <User className="w-4 h-4" />
                           </div>
                           <div className="text-left min-w-0">
                             <div className="font-semibold text-slate-900 text-sm truncate">{qUser.name}</div>
                             <div className="text-xs text-slate-400 truncate">{qUser.email}</div>
                           </div>
-                        </div>
-                        <div className="text-[10px] text-slate-400 bg-white px-2 py-0.5 rounded-full border border-slate-200 capitalize shrink-0 ml-2">
-                          {qUser.role}
                         </div>
                       </button>
                       <button
@@ -127,7 +121,6 @@ export function Login() {
                   ))}
                 </div>
               ) : (
-                /* No cookie — prompt to sign in */
                 <div className="py-6 text-center">
                   <div className="w-14 h-14 rounded-full bg-slate-50 flex items-center justify-center mx-auto mb-3">
                     <User className="w-6 h-6 text-slate-300" />
@@ -143,7 +136,6 @@ export function Login() {
                 </div>
               )}
 
-              {/* Always show the "Sign in with another account" option when there are users */}
               {quickUsers.length > 0 && (
                 <div className="mt-3">
                   <button
@@ -164,11 +156,10 @@ export function Login() {
             </>
           ) : (
             <>
-              {/* Manual Login Form */}
               <button
                 onClick={() => {
                   setShowManualForm(false);
-                  setQuickUsers(getQuickUsers()); // Refresh list when going back
+                  setQuickUsers(getQuickUsers().filter(u => u.role === 'client'));
                 }}
                 className="text-xs text-slate-400 hover:text-slate-600 mb-4 flex items-center gap-1 transition-colors"
               >

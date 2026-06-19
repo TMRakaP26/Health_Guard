@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router';
 import { useClaims } from '../state/ClaimContext';
 import { useAuth } from '../state/AuthContext';
 import apiClient from '../api/client';
-import { Check, User, Calendar, Stethoscope, UploadCloud, FileText, Pencil, Activity, ChevronDown, X, Trash2, Loader2 } from 'lucide-react';
+import { Check, User, Calendar, Stethoscope, UploadCloud, FileText, Pencil, Activity, ChevronDown, X, Trash2, Loader2, CreditCard, AlertCircle } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -57,7 +57,22 @@ function Input({ label, icon, className, ...props }: InputProps) {
   );
 }
 
-function CurrencyInput({ label, className, ...props }: Omit<InputProps, 'icon'>) {
+function CurrencyInput({ label, className, value, onChange, ...props }: Omit<InputProps, 'icon'> & { value: number; onChange: (e: React.ChangeEvent<HTMLInputElement>) => void }) {
+  // Format number with comma thousand separators
+  const displayValue = value ? value.toLocaleString('en-US') : '';
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Strip everything except digits
+    const raw = e.target.value.replace(/[^0-9]/g, '');
+    const numericValue = raw ? parseInt(raw, 10) : 0;
+    // Create a synthetic event with the numeric value
+    const syntheticEvent = {
+      ...e,
+      target: { ...e.target, value: String(numericValue) },
+    } as React.ChangeEvent<HTMLInputElement>;
+    onChange(syntheticEvent);
+  };
+
   return (
     <div className="flex flex-col gap-2 w-full">
       <label className="text-sm font-medium text-slate-700">{label}</label>
@@ -66,10 +81,12 @@ function CurrencyInput({ label, className, ...props }: Omit<InputProps, 'icon'>)
           <span className="text-slate-400 text-sm">Rp</span>
         </div>
         <input
-          type="number"
-          step="1000"
+          type="text"
+          inputMode="numeric"
           placeholder="0"
           required
+          value={displayValue}
+          onChange={handleChange}
           className={cn(
             "w-full rounded-lg border border-slate-200 bg-white py-2 pl-10 pr-3.5 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all",
             className
@@ -157,6 +174,7 @@ function PatientInfoStep({ formData, setFormData, isEdit }: any) {
         <Input label="First Name" type="text" required icon={<User className="h-4 w-4" />} placeholder="e.g. John" value={formData.firstName} onChange={e => setFormData({...formData, firstName: e.target.value})} />
         <Input label="Last Name" type="text" required icon={<User className="h-4 w-4" />} placeholder="e.g. Doe" value={formData.lastName} onChange={e => setFormData({...formData, lastName: e.target.value})} />
         <Input label="Date of Birth" type="date" required icon={<Calendar className="h-4 w-4" />} value={formData.dob} onChange={e => setFormData({...formData, dob: e.target.value})} />
+        <Input label="BPJS Number" type="text" required icon={<CreditCard className="h-4 w-4" />} placeholder="e.g. 000123456789" value={formData.bpjsNumber} onChange={e => setFormData({...formData, bpjsNumber: e.target.value})} />
       </div>
     </div>
   );
@@ -210,7 +228,11 @@ function ProviderDetailsStep({ formData, setFormData, isEdit }: any) {
                   <button
                     key={disease}
                     type="button"
-                    onClick={() => { setFormData({...formData, type: disease}); setShowDropdown(false); }}
+                    onMouseDown={(e) => {
+                      e.preventDefault(); // prevents input blur
+                      setFormData({...formData, type: disease});
+                      setShowDropdown(false);
+                    }}
                     className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-blue-50 transition-colors cursor-pointer"
                   >
                     {disease}
@@ -331,14 +353,18 @@ function UploadDocumentsStep({ isEdit, files, setFiles }: { isEdit: boolean; fil
   );
 }
 
-function ReviewStep({ formData, isEdit, filesCount }: { formData: any; isEdit: boolean; filesCount: number }) {
+function ReviewStep({ formData, isEdit, filesCount, isResubmit }: { formData: any; isEdit: boolean; filesCount: number; isResubmit?: boolean }) {
   return (
     <div className="space-y-10 animate-in fade-in slide-in-from-bottom-2 duration-500">
       <div className="space-y-2">
         <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">
-          {isEdit ? "Edit Claim (Review)" : "Submit New Claim (Review)"}
+          {isResubmit ? "Resubmit Claim (Review)" : isEdit ? "Edit Claim (Review)" : "Submit New Claim (Review)"}
         </h2>
-        <p className="text-sm text-slate-500">Please review the information below to ensure it is accurate before submitting.</p>
+        <p className="text-sm text-slate-500">
+          {isResubmit
+            ? "Please review the updated information before resubmitting your claim."
+            : "Please review the information below to ensure it is accurate before submitting."}
+        </p>
       </div>
       <div className="space-y-8">
         <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
@@ -356,6 +382,10 @@ function ReviewStep({ formData, isEdit, filesCount }: { formData: any; isEdit: b
             <div>
               <span className="block text-slate-500 text-xs mb-1.5">Date of Birth</span>
               <span className="font-medium text-slate-900">{formData.dob || '—'}</span>
+            </div>
+            <div>
+              <span className="block text-slate-500 text-xs mb-1.5">BPJS Number</span>
+              <span className="font-medium text-slate-900">{formData.bpjsNumber || '—'}</span>
             </div>
           </div>
         </div>
@@ -412,6 +442,12 @@ export function ClientClaimForm() {
     ? [userFullName.split(' ')[0], userFullName.split(' ').slice(1).join(' ')]
     : [userFullName, ''];
 
+  // Auto-fill DOB from user profile; format date_of_birth to YYYY-MM-DD for date input
+  const userDob = user?.date_of_birth
+    ? new Date(user.date_of_birth).toISOString().split('T')[0]
+    : '';
+  const userBpjs = user?.bpjs_number ?? '';
+
   const [formData, setFormData] = useState({
     firstName: editClaim ? editClaim.clientName.split(' ')[0] : firstNameDefault,
     lastName: editClaim ? editClaim.clientName.split(' ').slice(1).join(' ') : lastNameDefault,
@@ -419,7 +455,8 @@ export function ClientClaimForm() {
     type: editClaim ? editClaim.type : '',
     amount: editClaim ? editClaim.amount : 0,
     dateOfService: getTodayStr(),
-    dob: '',
+    dob: userDob, // always auto-fill from profile
+    bpjsNumber: editClaim ? (editClaim.bpjsNumber ?? '') : userBpjs,
   });
 
   const [stepErrors, setStepErrors] = useState<string[]>([]);
@@ -446,6 +483,7 @@ export function ClientClaimForm() {
       if (!formData.firstName.trim()) errors.push('First Name is required');
       if (!formData.lastName.trim()) errors.push('Last Name is required');
       if (!formData.dob) errors.push('Date of Birth is required');
+      if (!formData.bpjsNumber.trim()) errors.push('BPJS Number is required');
     } else if (step === 2) {
       if (!formData.dateOfService) errors.push('Date of Service is required');
       if (!formData.provider.trim()) errors.push('Provider Name is required');
@@ -483,6 +521,7 @@ export function ClientClaimForm() {
             type: formData.type,
             provider: formData.provider,
             amount: formData.amount,
+            bpjsNumber: formData.bpjsNumber,
           });
           claimId = newClaim.id;
         }
@@ -510,12 +549,36 @@ export function ClientClaimForm() {
       <div className="px-6 md:px-10 py-5 border-b border-slate-100 bg-white/50 z-20 shrink-0">
         <Stepper steps={STEPS} currentStep={currentStep} />
       </div>
+
+      {/* Resubmission Banner */}
+      {editClaim && (editClaim.status === 'Rejected' || editClaim.status === 'Partially Approved') && (
+        <div className={`mx-6 md:mx-10 mt-5 rounded-lg p-3.5 flex items-start gap-2.5 text-sm ${
+          editClaim.status === 'Rejected'
+            ? 'bg-rose-50 border border-rose-200 text-rose-800'
+            : 'bg-slate-100 border border-slate-200 text-slate-700'
+        }`}>
+          <AlertCircle className={`w-4 h-4 shrink-0 mt-0.5 ${
+            editClaim.status === 'Rejected' ? 'text-rose-500' : 'text-slate-500'
+          }`} />
+          <div>
+            <p className="font-semibold text-xs mb-0.5">
+              {editClaim.status === 'Rejected'
+                ? 'Your claim was rejected. Edit and resubmit with corrections.'
+                : 'Your claim was partially approved. Edit and resubmit if needed.'}
+            </p>
+            {editClaim.notes && (
+              <p className="text-xs leading-relaxed opacity-90">Analyst notes: {editClaim.notes}</p>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="px-6 md:px-10 py-10 flex-grow bg-white">
         <div className="max-w-3xl">
           {currentStep === 1 && <PatientInfoStep formData={formData} setFormData={setFormData} isEdit={!!editClaim} />}
           {currentStep === 2 && <ProviderDetailsStep formData={formData} setFormData={setFormData} isEdit={!!editClaim} />}
           {currentStep === 3 && <UploadDocumentsStep isEdit={!!editClaim} files={files} setFiles={setFiles} />}
-          {currentStep === 4 && <ReviewStep formData={formData} isEdit={!!editClaim} filesCount={files.length} />}
+          {currentStep === 4 && <ReviewStep formData={formData} isEdit={!!editClaim} isResubmit={!!editClaim && (editClaim.status === 'Rejected' || editClaim.status === 'Partially Approved')} filesCount={files.length} />}
         </div>
       </div>
       <div className="px-6 md:px-10 py-5 border-t border-slate-100 bg-white flex flex-col gap-3 shrink-0">
@@ -542,7 +605,7 @@ export function ClientClaimForm() {
               Back
             </Button>
             <Button variant="primary" onClick={handleNext} disabled={isSubmitting}>
-              {isSubmitting ? 'Submitting...' : currentStep === STEPS.length ? (editClaim ? 'Save Changes' : 'Submit Claim') : 'Next'}
+              {isSubmitting ? 'Submitting...' : currentStep === STEPS.length ? (editClaim ? 'Resubmit Claim' : 'Submit Claim') : 'Next'}
             </Button>
           </div>
         </div>

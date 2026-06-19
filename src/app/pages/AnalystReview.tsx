@@ -1,32 +1,59 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { useClaims, Claim } from '../state/ClaimContext';
-import { 
+import apiClient from '../api/client';
+import {
   FileText, ZoomIn, ZoomOut, RotateCw, Download,
   AlertCircle, CheckCircle2, XCircle, HelpCircle,
-  User, Hash, Activity, Banknote, ChevronDown, Check
+  User, Hash, Activity, Banknote, ChevronDown, Check, FileImage, File,
+  Loader2, RefreshCw, CreditCard
 } from 'lucide-react';
-import { ImageWithFallback } from '../components/figma/ImageWithFallback';
 
 const STATUS_OPTIONS = [
   { value: 'Pending', label: 'Pending Review', color: 'bg-amber-100 text-amber-800', icon: AlertCircle, iconColor: 'text-amber-600' },
   { value: 'Approved', label: 'Approved', color: 'bg-emerald-100 text-emerald-800', icon: CheckCircle2, iconColor: 'text-emerald-600' },
   { value: 'Rejected', label: 'Rejected', color: 'bg-rose-100 text-rose-800', icon: XCircle, iconColor: 'text-rose-600' },
-  { value: 'Needs Info', label: 'Needs Info', color: 'bg-blue-100 text-blue-800', icon: HelpCircle, iconColor: 'text-blue-600' }
+  { value: 'Needs Info', label: 'Needs Info', color: 'bg-blue-100 text-blue-800', icon: HelpCircle, iconColor: 'text-blue-600' },
+  { value: 'Partially Approved', label: 'Partially Approved', color: 'bg-slate-200 text-slate-700', icon: CheckCircle2, iconColor: 'text-slate-500' },
 ];
+
+interface DocFile {
+  id: number;
+  file_name: string;
+  file_path: string;
+  file_size: number;
+  mime_type: string;
+  created_at: string;
+}
 
 export function AnalystReview() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { claims, updateClaimStatus } = useClaims();
-  
+
   const claim = claims.find(c => c.id === id);
-  
+
   const [status, setStatus] = useState<Claim['status']>(claim?.status || 'Pending');
   const [notes, setNotes] = useState(claim?.notes || '');
+  const [approvedAmount, setApprovedAmount] = useState<string>(
+    claim?.approvedAmount != null ? String(claim.approvedAmount) : ''
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Document viewer state
+  const [documents, setDocuments] = useState<DocFile[]>([]);
+  const [activeDocIndex, setActiveDocIndex] = useState(0);
+  const [zoom, setZoom] = useState(100);
+  const [isFetchingDocs, setIsFetchingDocs] = useState(false);
+  const [docKey, setDocKey] = useState(0); // used to force iframe reload
+
+  const activeDoc = documents[activeDocIndex] ?? null;
+  const isImage = activeDoc ? /\.(jpe?g|png|gif|webp)$/i.test(activeDoc.file_name) : false;
+  const isPdf = activeDoc ? activeDoc.mime_type === 'application/pdf' || /\.pdf$/i.test(activeDoc.file_name) : false;
+  const docUrl = activeDoc ? `/storage/${activeDoc.file_path.replace(/^storage\//, '')}` : '';
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -38,6 +65,24 @@ export function AnalystReview() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Fetch documents for this claim
+  useEffect(() => {
+    if (!id) return;
+    const fetchDocs = async () => {
+      setIsFetchingDocs(true);
+      try {
+        const res = await apiClient.get(`/claims/${id}/documents`);
+        const data = res.data.data || res.data;
+        setDocuments(Array.isArray(data) ? data : []);
+      } catch {
+        setDocuments([]);
+      } finally {
+        setIsFetchingDocs(false);
+      }
+    };
+    fetchDocs();
+  }, [id]);
+
   if (!claim) {
     return (
       <div className="flex items-center justify-center h-full text-slate-500">
@@ -47,14 +92,61 @@ export function AnalystReview() {
   }
 
   const handleSubmit = async () => {
+    setSubmitError('');
+
+    // Validate: only Partially Approved requires approved amount
+    if (status === 'Partially Approved' && approvedAmount === '') {
+      setSubmitError('Please enter the approved amount before submitting.');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      await updateClaimStatus(claim.id, status, notes);
+      const approved = status === 'Partially Approved' && approvedAmount !== ''
+        ? parseFloat(approvedAmount)
+        : undefined;
+      await updateClaimStatus(claim.id, status, notes, approved);
       navigate('/analyst');
     } catch (err) {
       console.error('Failed to update claim status:', err);
+      setSubmitError('Failed to submit decision. Please try again.');
       setIsSubmitting(false);
     }
+  };
+
+  const handleDownload = () => {
+    if (!activeDoc) return;
+    const downloadUrl = `/api/claims/${claim.id}/documents/${activeDoc.id}/download`;
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = activeDoc.file_name;
+    // Fetch the file as blob to trigger proper download
+    const token = localStorage.getItem('auth_token');
+    fetch(downloadUrl, { headers: { Authorization: `Bearer ${token}` } })
+      .then(res => res.blob())
+      .then(blob => {
+        const url = URL.createObjectURL(blob);
+        a.href = url;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      })
+      .catch(() => {
+        // fallback: open in new tab
+        window.open(downloadUrl, '_blank');
+      });
+  };
+
+  const handleRefresh = () => {
+    setDocKey(k => k + 1);
+    setZoom(100);
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
   return (
@@ -74,12 +166,12 @@ export function AnalystReview() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-           <button 
-             onClick={() => navigate('/analyst')}
-             className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-           >
-             Cancel Review
-           </button>
+          <button
+            onClick={() => navigate('/analyst')}
+            className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+          >
+            Cancel Review
+          </button>
         </div>
       </div>
 
@@ -96,7 +188,7 @@ export function AnalystReview() {
               </div>
               <p className="text-sm font-medium text-slate-900 truncate max-w-[50%]">{claim.clientName}</p>
             </div>
-            
+
             <div className="px-5 py-3.5 flex items-center justify-between border-b border-slate-100">
               <div className="flex items-center gap-3">
                 <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded-md shrink-0"><Hash size={14} /></div>
@@ -104,7 +196,7 @@ export function AnalystReview() {
               </div>
               <p className="text-sm font-medium text-slate-900 truncate max-w-[50%]">{claim.provider}</p>
             </div>
-            
+
             <div className="px-5 py-3.5 flex items-center justify-between border-b border-slate-100">
               <div className="flex items-center gap-3">
                 <div className="p-1.5 bg-purple-50 text-purple-600 rounded-md shrink-0"><Activity size={14} /></div>
@@ -112,49 +204,168 @@ export function AnalystReview() {
               </div>
               <p className="text-sm font-medium text-slate-900 truncate max-w-[50%]">{claim.type}</p>
             </div>
-            
-            <div className="px-5 py-3.5 flex items-center justify-between">
+
+            <div className="px-5 py-3.5 flex items-center justify-between border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="p-1.5 bg-orange-50 text-orange-600 rounded-md shrink-0"><CreditCard size={14} /></div>
+                <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">BPJS Number</span>
+              </div>
+              <p className="text-sm font-medium text-slate-900 truncate max-w-[50%]">{claim.bpjsNumber ?? <span className="text-slate-300">—</span>}</p>
+            </div>
+
+            <div className="px-5 py-3.5 flex items-center justify-between border-b border-slate-100">
               <div className="flex items-center gap-3">
                 <div className="p-1.5 bg-emerald-50 text-emerald-600 rounded-md shrink-0"><Banknote size={14} /></div>
                 <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total Billed</span>
               </div>
               <p className="text-sm font-medium text-slate-900 truncate max-w-[50%]">Rp {claim.amount.toLocaleString('id-ID', { minimumFractionDigits: 0 })}</p>
             </div>
+
+            {/* Approved Billed - manually filled by analyst */}
+            <div className="px-5 py-3.5 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-1.5 bg-teal-50 text-teal-600 rounded-md shrink-0"><Banknote size={14} /></div>
+                <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Approved Billed</span>
+              </div>
+              <div className="flex items-center gap-2 max-w-[50%]">
+                <span className="text-sm text-slate-500">Rp</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  min={0}
+                  value={approvedAmount ? Number(approvedAmount).toLocaleString('en-US') : ''}
+                  onChange={(e) => {
+                    const raw = e.target.value.replace(/[^0-9]/g, '');
+                    setApprovedAmount(raw);
+                  }}
+                  placeholder="0"
+                  disabled={status !== 'Partially Approved'}
+                  className="w-36 px-2 py-1 border border-slate-200 rounded-lg text-sm text-slate-900 text-right focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:bg-slate-50 disabled:text-slate-400 transition-all"
+                />
+              </div>
+            </div>
           </div>
 
           {/* Document Viewer Container */}
           <div className="flex-1 min-h-[500px] flex flex-col bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+            {/* Document header with controls */}
             <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50/80 shrink-0">
-              <div className="flex items-center gap-3">
-                <FileText size={18} className="text-blue-600" />
-                <div>
-                  <div className="text-sm font-medium text-slate-900 leading-none mb-1">Hospital_Invoice_SJ.pdf</div>
-                  <div className="text-xs text-slate-500">Page 1 of 3 • 4.1 MB</div>
+              <div className="flex items-center gap-3 min-w-0">
+                <FileText size={18} className="text-blue-600 shrink-0" />
+                {activeDoc ? (
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-slate-900 leading-none mb-1 truncate">{activeDoc.file_name}</div>
+                    <div className="text-xs text-slate-500">{formatFileSize(activeDoc.file_size)}</div>
+                  </div>
+                ) : (
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-slate-400 leading-none mb-1">
+                      {isFetchingDocs ? 'Loading documents...' : 'No documents attached'}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {activeDoc && (
+                <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg p-1 shrink-0">
+                  <button
+                    onClick={() => setZoom(z => Math.max(25, z - 25))}
+                    className="p-1 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded transition-colors cursor-pointer disabled:opacity-40"
+                    title="Zoom Out"
+                    disabled={zoom <= 25}
+                  ><ZoomOut size={16} /></button>
+                  <span className="text-xs font-medium px-2 text-slate-700 min-w-[3rem] text-center">{zoom}%</span>
+                  <button
+                    onClick={() => setZoom(z => Math.min(300, z + 25))}
+                    className="p-1 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded transition-colors cursor-pointer disabled:opacity-40"
+                    title="Zoom In"
+                    disabled={zoom >= 300}
+                  ><ZoomIn size={16} /></button>
+                  <div className="w-px h-4 bg-slate-200 mx-1"></div>
+                  <button
+                    onClick={handleRefresh}
+                    className="p-1 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded transition-colors cursor-pointer"
+                    title="Refresh"
+                  ><RefreshCw size={16} /></button>
+                  <button
+                    onClick={handleDownload}
+                    className="p-1 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded transition-colors cursor-pointer"
+                    title="Download"
+                  ><Download size={16} /></button>
                 </div>
-              </div>
-              <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg p-1">
-                <button className="p-1 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded transition-colors cursor-pointer" title="Zoom Out"><ZoomOut size={16} /></button>
-                <span className="text-xs font-medium px-2 text-slate-700">100%</span>
-                <button className="p-1 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded transition-colors cursor-pointer" title="Zoom In"><ZoomIn size={16} /></button>
-                <div className="w-px h-4 bg-slate-200 mx-1"></div>
-                <button className="p-1 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded transition-colors cursor-pointer" title="Rotate"><RotateCw size={16} /></button>
-                <button className="p-1 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded transition-colors cursor-pointer" title="Download"><Download size={16} /></button>
-              </div>
+              )}
             </div>
-            
-            <div className="flex-1 bg-slate-200/40 p-8 overflow-auto flex justify-center items-start shadow-inner">
-              <div className="w-full max-w-3xl bg-white shadow-md border border-slate-200 rounded-sm min-h-[800px] p-6 relative">
-                <ImageWithFallback 
-                  src="https://images.unsplash.com/photo-1625980344922-a4df108b2bd0?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxob3NwaXRhbCUyMGJpbGwlMjBpbnZvaWNlfGVufDF8fHx8MTc3ODc3MTk1Nnww&ixlib=rb-4.1.0&q=80&w=1080"
-                  alt="Generic Hospital Bill Placeholder"
-                  className="w-full h-auto object-contain mix-blend-multiply opacity-80 blur-[4px] pointer-events-none select-none"
-                />
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <div className="bg-white/80 backdrop-blur-sm px-6 py-3 rounded-full border border-slate-200 shadow-sm text-slate-500 font-medium text-sm">
-                    Document Preview Protected
+
+            {/* Document list tabs (when multiple documents) */}
+            {documents.length > 1 && (
+              <div className="flex gap-0 border-b border-slate-200 bg-white overflow-x-auto shrink-0">
+                {documents.map((doc, i) => (
+                  <button
+                    key={doc.id}
+                    onClick={() => { setActiveDocIndex(i); setZoom(100); }}
+                    className={`flex items-center gap-1.5 px-4 py-2 text-xs font-medium whitespace-nowrap border-b-2 transition-colors cursor-pointer ${
+                      i === activeDocIndex
+                        ? 'border-blue-600 text-blue-700 bg-blue-50/40'
+                        : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    {/\.(jpe?g|png|gif|webp)$/i.test(doc.file_name) ? <FileImage size={13} /> : <File size={13} />}
+                    {doc.file_name}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Document preview area */}
+            <div className="flex-1 bg-slate-200/40 overflow-auto flex justify-center items-start shadow-inner relative">
+              {isFetchingDocs ? (
+                <div className="flex flex-col items-center justify-center h-full gap-2 text-slate-400 p-8">
+                  <Loader2 size={32} className="animate-spin" />
+                  <span className="text-sm">Loading documents...</span>
+                </div>
+              ) : !activeDoc ? (
+                <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400 p-8">
+                  <FileText size={48} strokeWidth={1.2} />
+                  <div className="text-center">
+                    <p className="text-sm font-medium text-slate-500">No documents attached</p>
+                    <p className="text-xs text-slate-400 mt-1">The client has not uploaded any documents for this claim.</p>
                   </div>
                 </div>
-              </div>
+              ) : isImage ? (
+                <div className="p-4 flex justify-center" style={{ minWidth: '100%' }}>
+                  <img
+                    key={docKey}
+                    src={docUrl}
+                    alt={activeDoc.file_name}
+                    className="max-w-full shadow-md border border-slate-200 rounded-sm transition-transform duration-200"
+                    style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'top center' }}
+                    onError={() => {/* handled by fallback */}}
+                  />
+                </div>
+              ) : isPdf ? (
+                <iframe
+                  key={`${docKey}-${activeDoc.id}`}
+                  src={docUrl}
+                  title={activeDoc.file_name}
+                  className="w-full h-full border-0"
+                  style={{ minHeight: '600px', transform: `scale(${zoom / 100})`, transformOrigin: 'top left', width: `${10000 / zoom}%`, height: `${10000 / zoom}%` }}
+                />
+              ) : (
+                <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400 p-8">
+                  <File size={48} strokeWidth={1.2} />
+                  <div className="text-center">
+                    <p className="text-sm font-medium text-slate-500">{activeDoc.file_name}</p>
+                    <p className="text-xs text-slate-400 mt-1">Preview not available for this file type. Use the download button.</p>
+                  </div>
+                  <button
+                    onClick={handleDownload}
+                    className="mt-2 flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors cursor-pointer"
+                  >
+                    <Download size={14} />
+                    Download File
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -210,7 +421,10 @@ export function AnalystReview() {
               </div>
             </div>
 
-            <div className={`transition-all duration-300 ease-in-out overflow-hidden ${status !== 'Pending' && status !== 'Approved' ? 'max-h-40 opacity-100' : 'max-h-0 opacity-0'}`}>
+            {/* Contextual hints */}
+            <div className={`transition-all duration-300 ease-in-out overflow-hidden ${
+              status === 'Rejected' || status === 'Needs Info' || status === 'Partially Approved' ? 'max-h-40 opacity-100' : 'max-h-0 opacity-0'
+            }`}>
               {status === 'Rejected' && (
                 <div className="bg-rose-50 border border-rose-100 rounded-lg p-3 text-sm text-rose-800 flex gap-2.5">
                   <AlertCircle size={18} className="text-rose-600 shrink-0 mt-0.5" />
@@ -221,6 +435,12 @@ export function AnalystReview() {
                 <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm text-blue-800 flex gap-2.5">
                   <HelpCircle size={18} className="text-blue-600 shrink-0 mt-0.5" />
                   <p className="leading-relaxed">Please specify exactly what documents or information are missing from the provider or client.</p>
+                </div>
+              )}
+              {status === 'Partially Approved' && (
+                <div className="bg-slate-100 border border-slate-200 rounded-lg p-3 text-sm text-slate-700 flex gap-2.5">
+                  <CheckCircle2 size={18} className="text-slate-500 shrink-0 mt-0.5" />
+                  <p className="leading-relaxed">Enter the approved amount in the Approved Billed field above. Notes explaining the partial approval are recommended.</p>
                 </div>
               )}
             </div>
@@ -241,7 +461,13 @@ export function AnalystReview() {
           </div>
 
           <div className="p-6 border-t border-slate-200 bg-slate-50/50 flex flex-col gap-3 shrink-0">
-            <button 
+            {submitError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg flex items-start gap-2 text-sm text-rose-700 animate-in fade-in slide-in-from-top-1 duration-200">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{submitError}</span>
+              </div>
+            )}
+            <button
               onClick={handleSubmit}
               disabled={isSubmitting}
               className="w-full py-2.5 px-4 bg-blue-600 text-white font-medium rounded-lg shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-600 transition-colors flex items-center justify-center gap-2 text-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"

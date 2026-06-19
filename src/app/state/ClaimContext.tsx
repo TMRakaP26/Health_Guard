@@ -8,8 +8,11 @@ export interface Claim {
   type: string;
   provider: string;
   amount: number;
-  status: 'Pending' | 'Approved' | 'Rejected' | 'Needs Info';
+  status: 'Pending' | 'Approved' | 'Rejected' | 'Needs Info' | 'Partially Approved';
   notes?: string;
+  assignedTo?: string;
+  approvedAmount?: number;
+  bpjsNumber?: string;
 }
 
 interface PaginationInfo {
@@ -23,7 +26,7 @@ interface ClaimContextType {
   claims: Claim[];
   pagination: PaginationInfo;
   addClaim: (claim: Omit<Claim, 'id' | 'dateSubmitted' | 'status'>) => Promise<Claim>;
-  updateClaimStatus: (id: string, status: Claim['status'], notes?: string) => Promise<void>;
+  updateClaimStatus: (id: string, status: Claim['status'], notes?: string, approvedAmount?: number) => Promise<void>;
   updateClaim: (id: string, claimData: Partial<Claim>) => Promise<void>;
   fetchClaims: (page?: number) => Promise<void>;
   assignClaim: (id: string) => Promise<void>;
@@ -40,6 +43,9 @@ function transformApiClaim(apiClaim: any): Claim {
     amount: Number(apiClaim.amount),
     status: apiClaim.status,
     notes: apiClaim.notes,
+    assignedTo: apiClaim.assigned_analyst?.name ?? undefined,
+    approvedAmount: apiClaim.approved_amount != null ? Number(apiClaim.approved_amount) : undefined,
+    bpjsNumber: apiClaim.bpjs_number ?? undefined,
   };
 }
 
@@ -80,20 +86,24 @@ export function ClaimProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addClaim = async (claimData: Omit<Claim, 'id' | 'dateSubmitted' | 'status'>): Promise<Claim> => {
-    const response = await apiClient.post('/claims', {
+    const payload: Record<string, any> = {
       client_name: claimData.clientName,
       type: claimData.type,
       provider_name: claimData.provider,
       amount: claimData.amount,
-    });
+    };
+    if (claimData.bpjsNumber) payload.bpjs_number = claimData.bpjsNumber;
+    const response = await apiClient.post('/claims', payload);
     const newClaim = transformApiClaim(response.data);
     setClaims(prev => [newClaim, ...prev]);
     return newClaim;
   };
 
-  const updateClaimStatus = async (id: string, status: Claim['status'], notes?: string) => {
-    await apiClient.patch(`/claims/${id}/status`, { status, notes });
-    setClaims(prev => prev.map(c => c.id === id ? { ...c, status, notes: notes || c.notes } : c));
+  const updateClaimStatus = async (id: string, status: Claim['status'], notes?: string, approvedAmount?: number) => {
+    const payload: Record<string, any> = { status, notes };
+    if (approvedAmount !== undefined) payload.approved_amount = approvedAmount;
+    await apiClient.patch(`/claims/${id}/status`, payload);
+    setClaims(prev => prev.map(c => c.id === id ? { ...c, status, notes: notes || c.notes, approvedAmount: approvedAmount ?? c.approvedAmount } : c));
   };
 
   const updateClaim = async (id: string, claimData: Partial<Claim>) => {
@@ -104,7 +114,8 @@ export function ClaimProvider({ children }: { children: ReactNode }) {
     if (claimData.amount !== undefined) payload.amount = claimData.amount;
     
     await apiClient.put(`/claims/${id}`, payload);
-    setClaims(prev => prev.map(c => c.id === id ? { ...c, ...claimData, status: 'Pending' } : c));
+    // Reset status, approvedAmount, and notes on resubmission
+    setClaims(prev => prev.map(c => c.id === id ? { ...c, ...claimData, status: 'Pending', approvedAmount: undefined, notes: undefined } : c));
   };
 
   const assignClaim = async (id: string) => {

@@ -5,7 +5,7 @@ import apiClient from "../api/client";
 import type { Claim } from "../state/ClaimContext";
 
 interface AssignedClaim extends Claim {
-  assignedTo: number;
+  assignedToId: number;
 }
 
 export function MyAssignments() {
@@ -34,7 +34,9 @@ export function MyAssignments() {
         amount: Number(item.amount),
         status: item.status,
         notes: item.notes,
-        assignedTo: item.assigned_to,
+        assignedToId: item.assigned_to,
+        assignedTo: item.assigned_analyst?.name,
+        approvedAmount: item.approved_amount != null ? Number(item.approved_amount) : undefined,
       })));
     } catch {
       console.error('Failed to fetch assignments');
@@ -61,6 +63,8 @@ export function MyAssignments() {
         return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-rose-100 text-rose-800">Rejected</span>;
       case 'Needs Info':
         return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">Needs Info</span>;
+      case 'Partially Approved':
+        return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-200 text-slate-700 border border-slate-300">Partially Approved</span>;
       default:
         return <span>{status}</span>;
     }
@@ -98,6 +102,7 @@ export function MyAssignments() {
                 <option value="Needs Info">Needs Info</option>
                 <option value="Approved">Approved</option>
                 <option value="Rejected">Rejected</option>
+                <option value="Partially Approved">Partially Approved</option>
               </select>
               <ChevronDown className="absolute right-2.5 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
             </div>

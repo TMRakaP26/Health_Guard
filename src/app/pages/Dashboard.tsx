@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { FileText, TrendingUp, Activity, Search, Filter, X, Loader2, Banknote } from "lucide-react";
+import { FileText, TrendingUp, Activity, Search, Filter, X, Loader2, Banknote, CheckCircle, AlertCircle, Pencil } from "lucide-react";
 import { useClaims, Claim } from "../state/ClaimContext";
 import { useNavigate, useSearchParams } from "react-router";
 
@@ -31,6 +31,13 @@ const getStatusBadge = (status: string) => {
         <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-rose-50 text-rose-700 border border-rose-200">
           <span className="w-1 h-1 rounded-full bg-rose-400 mr-1.5"></span>
           Rejected
+        </span>
+      );
+    case "Partially Approved":
+      return (
+        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-600 border border-slate-300">
+          <span className="w-1 h-1 rounded-full bg-slate-400 mr-1.5"></span>
+          Partially Approved
         </span>
       );
     default:
@@ -66,8 +73,8 @@ export function Dashboard() {
   const pendingClaims = filteredClaims.filter(c => c.status === 'Pending').length;
   
   const totalPayouts = filteredClaims
-    .filter(c => c.status === 'Approved')
-    .reduce((sum, c) => sum + c.amount, 0);
+    .filter(c => c.status === 'Approved' || c.status === 'Partially Approved')
+    .reduce((sum, c) => sum + (c.approvedAmount ?? c.amount), 0);
 
   return (
     <div className="max-w-5xl mx-auto space-y-12 relative">
@@ -143,7 +150,9 @@ export function Dashboard() {
                 <th className="px-6 py-3 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Date Submitted</th>
                 <th className="px-6 py-3 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Provider Name</th>
                 <th className="px-6 py-3 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Billed Amount</th>
+                <th className="px-6 py-3 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Approved Amount</th>
                 <th className="px-6 py-3 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Status</th>
+                <th className="px-6 py-3 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Assigned Analyst</th>
                 <th className="px-6 py-3 text-[10px] font-semibold text-slate-400 uppercase tracking-wider text-right">Action</th>
               </tr>
             </thead>
@@ -162,8 +171,17 @@ export function Dashboard() {
                   <td className="px-6 py-3 whitespace-nowrap text-xs font-medium text-slate-700">
                     Rp {claim.amount.toLocaleString('id-ID', { minimumFractionDigits: 0 })}
                   </td>
+                  <td className="px-6 py-3 whitespace-nowrap text-xs">
+                    {claim.approvedAmount != null
+                      ? <span className="font-medium text-emerald-600">Rp {claim.approvedAmount.toLocaleString('id-ID', { minimumFractionDigits: 0 })}</span>
+                      : <span className="text-slate-300">—</span>
+                    }
+                  </td>
                   <td className="px-6 py-3 whitespace-nowrap">
                     {getStatusBadge(claim.status)}
+                  </td>
+                  <td className="px-6 py-3 whitespace-nowrap text-xs text-slate-500">
+                    {claim.assignedTo ?? <span className="text-slate-300">—</span>}
                   </td>
                   <td className="px-6 py-3 whitespace-nowrap text-right text-[11px] font-medium">
                     <button 
@@ -177,14 +195,14 @@ export function Dashboard() {
               ))}
               {isLoading ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-8 text-center text-slate-500 text-xs">
+                  <td colSpan={8} className="px-6 py-8 text-center text-slate-500 text-xs">
                     <Loader2 className="w-4 h-4 animate-spin inline mr-2" />
                     Loading claims...
                   </td>
                 </tr>
               ) : claims.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-6 py-8 text-center text-slate-500 text-xs">
+                  <td colSpan={8} className="px-6 py-8 text-center text-slate-500 text-xs">
                     No claims submitted yet.
                   </td>
                 </tr>
@@ -212,6 +230,30 @@ export function Dashboard() {
             </div>
             
             <div className="p-6 space-y-6">
+              {/* Rejection / Partial Approval Banner */}
+              {(selectedClaim.status === 'Rejected' || selectedClaim.status === 'Partially Approved') && (
+                <div className={`rounded-lg p-3.5 flex items-start gap-2.5 text-sm ${
+                  selectedClaim.status === 'Rejected'
+                    ? 'bg-rose-50 border border-rose-200 text-rose-800'
+                    : 'bg-slate-100 border border-slate-200 text-slate-700'
+                }`}>
+                  <AlertCircle className={`w-4 h-4 shrink-0 mt-0.5 ${
+                    selectedClaim.status === 'Rejected' ? 'text-rose-500' : 'text-slate-500'
+                  }`} />
+                  <div>
+                    <p className="font-semibold text-xs mb-0.5">
+                      {selectedClaim.status === 'Rejected' ? 'This claim was rejected' : 'This claim was partially approved'}
+                    </p>
+                    {selectedClaim.notes && (
+                      <p className="text-xs leading-relaxed opacity-90">{selectedClaim.notes}</p>
+                    )}
+                    <p className="text-xs mt-1.5 font-medium">
+                      You can edit and resubmit this claim below.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <p className="text-[10px] font-medium text-slate-400 uppercase tracking-wider mb-1">Claim ID</p>
@@ -231,6 +273,15 @@ export function Dashboard() {
                   <p className="text-[10px] font-medium text-slate-400 uppercase tracking-wider mb-1">Amount Billed</p>
                   <p className="text-sm font-medium text-slate-800">Rp {selectedClaim.amount.toLocaleString('id-ID', { minimumFractionDigits: 0 })}</p>
                 </div>
+                {selectedClaim.approvedAmount != null && (
+                  <div>
+                    <p className="text-[10px] font-medium text-slate-400 uppercase tracking-wider mb-1">Approved Amount</p>
+                    <p className="text-sm font-semibold text-emerald-600 flex items-center gap-1.5">
+                      <CheckCircle className="w-3.5 h-3.5" />
+                      Rp {selectedClaim.approvedAmount.toLocaleString('id-ID', { minimumFractionDigits: 0 })}
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="bg-slate-50 rounded-lg p-4 border border-slate-100">
@@ -248,16 +299,20 @@ export function Dashboard() {
             </div>
             
             <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-between items-center">
-              <button 
-                onClick={() => {
-                  setSelectedClaim(null);
-                  navigate('/client/submit', { state: { editClaim: selectedClaim } });
-                }}
-                className="px-4 py-2 bg-blue-50 border border-blue-200 rounded-md text-sm font-medium text-blue-600 hover:bg-blue-100 transition-colors flex items-center gap-2"
-              >
-                <FileText className="w-4 h-4" />
-                Edit Claim
-              </button>
+              {(selectedClaim.status === 'Rejected' || selectedClaim.status === 'Partially Approved') ? (
+                <button 
+                  onClick={() => {
+                    setSelectedClaim(null);
+                    navigate('/client/submit', { state: { editClaim: selectedClaim } });
+                  }}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 transition-colors flex items-center gap-2 shadow-sm"
+                >
+                  <Pencil className="w-4 h-4" />
+                  Edit & Resubmit
+                </button>
+              ) : (
+                <div />
+              )}
               <button 
                 onClick={() => setSelectedClaim(null)}
                 className="px-4 py-2 bg-white border border-slate-200 rounded-md text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"

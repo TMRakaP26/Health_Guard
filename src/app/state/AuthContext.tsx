@@ -11,6 +11,8 @@ interface User {
   phone?: string;
   address?: string;
   profile_photo?: string | null;
+  date_of_birth?: string | null;
+  bpjs_number?: string | null;
 }
 
 interface AuthContextType {
@@ -18,7 +20,7 @@ interface AuthContextType {
   token: string | null;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (name: string, email: string, password: string, role?: string) => Promise<void>;
+  register: (name: string, email: string, password: string, role?: string, dateOfBirth?: string, bpjsNumber?: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   isAuthenticated: boolean;
@@ -55,8 +57,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     saveQuickUserCookie(userData, password);
   };
 
-  const register = async (name: string, email: string, password: string, role?: string) => {
-    const response = await apiClient.post('/register', { name, email, password, role });
+  const register = async (name: string, email: string, password: string, role?: string, dateOfBirth?: string, bpjsNumber?: string) => {
+    const payload: Record<string, any> = { name, email, password, role };
+    if (dateOfBirth) payload.date_of_birth = dateOfBirth;
+    if (bpjsNumber) payload.bpjs_number = bpjsNumber;
+    const response = await apiClient.post('/register', payload);
     const { user: userData, token: newToken } = response.data;
     setUser(userData);
     setToken(newToken);

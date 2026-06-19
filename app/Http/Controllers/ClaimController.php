@@ -14,7 +14,7 @@ class ClaimController extends Controller
     {
         $user = $request->user();
 
-        $query = Claim::with('user');
+        $query = Claim::with(['user', 'assignedAnalyst']);
 
         if ($user->isClient()) {
             $query->where('user_id', $user->id);
@@ -28,7 +28,7 @@ class ClaimController extends Controller
 
     public function unassigned(Request $request): JsonResponse
     {
-        $claims = Claim::with('user')
+        $claims = Claim::with(['user', 'assignedAnalyst'])
             ->whereNull('assigned_to')
             ->where('status', 'Pending')
             ->orderBy('date_submitted', 'desc')
@@ -39,7 +39,7 @@ class ClaimController extends Controller
 
     public function myAssignments(Request $request): JsonResponse
     {
-        $claims = Claim::with('user')
+        $claims = Claim::with(['user', 'assignedAnalyst'])
             ->where('assigned_to', $request->user()->id)
             ->orderBy('date_submitted', 'desc')
             ->paginate(min((int) $request->get('per_page', 20), 100));
@@ -71,7 +71,7 @@ class ClaimController extends Controller
         ]);
 
         return response()->json([
-            'claim' => $claim->load('user'),
+            'claim' => $claim->load(['user', 'assignedAnalyst']),
             'message' => 'Claim assigned successfully',
         ]);
     }
@@ -83,6 +83,7 @@ class ClaimController extends Controller
             'type' => 'required|string|max:255',
             'provider_name' => 'required|string|max:255',
             'amount' => 'required|numeric|min:0',
+            'bpjs_number' => 'sometimes|string|max:30',
         ]);
 
         $claim = Claim::create([
@@ -92,6 +93,7 @@ class ClaimController extends Controller
             'type' => $validated['type'],
             'provider_name' => $validated['provider_name'],
             'amount' => $validated['amount'],
+            'bpjs_number' => $validated['bpjs_number'] ?? null,
             'status' => 'Pending',
             'date_submitted' => now(),
         ]);
@@ -108,12 +110,12 @@ class ClaimController extends Controller
             ]);
         }
 
-        return response()->json($claim, 201);
+        return response()->json($claim->load('assignedAnalyst'), 201);
     }
 
     public function show(Request $request, string $id): JsonResponse
     {
-        $claim = Claim::with(['user', 'documents'])->where('claim_id', $id)->firstOrFail();
+        $claim = Claim::with(['user', 'documents', 'assignedAnalyst'])->where('claim_id', $id)->firstOrFail();
 
         if ($request->user()->isClient() && $claim->user_id !== $request->user()->id) {
             return response()->json(['message' => 'Forbidden'], 403);
@@ -137,9 +139,12 @@ class ClaimController extends Controller
             'amount' => 'sometimes|numeric|min:0',
         ]);
 
-        $claim->update(array_merge($validated, ['status' => 'Pending']));
+        $claim->update(array_merge($validated, [
+            'status' => 'Pending',
+            'approved_amount' => null, // Reset approved amount on resubmission
+        ]));
 
-        return response()->json($claim);
+        return response()->json($claim->load('assignedAnalyst'));
     }
 
     public function updateStatus(Request $request, string $id): JsonResponse
@@ -151,8 +156,9 @@ class ClaimController extends Controller
         $claim = Claim::where('claim_id', $id)->firstOrFail();
 
         $validated = $request->validate([
-            'status' => 'required|string|in:Pending,Approved,Rejected,Needs Info',
+            'status' => 'required|string|in:Pending,Approved,Rejected,Needs Info,Partially Approved',
             'notes' => 'nullable|string',
+            'approved_amount' => 'nullable|numeric|min:0',
         ]);
 
         $claim->update($validated);
@@ -168,6 +174,6 @@ class ClaimController extends Controller
             'claim_id' => $claim->claim_id,
         ]);
 
-        return response()->json($claim);
+        return response()->json($claim->load('assignedAnalyst'));
     }
 }

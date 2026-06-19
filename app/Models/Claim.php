@@ -22,12 +22,15 @@ class Claim extends Model
         'status',
         'notes',
         'date_submitted',
+        'approved_amount',
+        'bpjs_number',
     ];
 
     protected function casts(): array
     {
         return [
             'amount' => 'decimal:2',
+            'approved_amount' => 'decimal:2',
             'date_submitted' => 'datetime',
         ];
     }

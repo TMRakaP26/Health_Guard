@@ -21,6 +21,8 @@ class AuthController extends Controller
             'role' => 'sometimes|string|in:client,analyst',
             'phone' => 'sometimes|string|max:20',
             'address' => 'sometimes|string|max:1000',
+            'date_of_birth' => 'sometimes|date',
+            'bpjs_number' => 'sometimes|string|max:30',
         ]);
 
         $user = User::create([
@@ -31,6 +33,8 @@ class AuthController extends Controller
             'role' => $validated['role'] ?? 'client',
             'phone' => $validated['phone'] ?? null,
             'address' => $validated['address'] ?? null,
+            'date_of_birth' => $validated['date_of_birth'] ?? null,
+            'bpjs_number' => $validated['bpjs_number'] ?? null,
         ]);
 
         $token = $user->createToken('api-token')->plainTextToken;
@@ -86,6 +90,8 @@ class AuthController extends Controller
             'email' => 'sometimes|string|email|max:255|unique:users,email,' . $user->id,
             'phone' => 'sometimes|string|max:20',
             'address' => 'sometimes|string|max:1000',
+            'date_of_birth' => 'sometimes|date',
+            'bpjs_number' => 'sometimes|string|max:30',
         ];
 
         // If password is being changed, require current_password
